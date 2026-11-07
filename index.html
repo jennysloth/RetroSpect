@@ -734,6 +734,7 @@ html.view-join #join, html.view-join #roster{animation:pageIn .45s cubic-bezier(
         <label for="f-note">想對我們說的話（選填）</label>
         <textarea id="f-note" name="note" rows="2" maxlength="300"></textarea>
       </div>
+      <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
       <button class="btn brick" type="submit" id="f-submit">送出登記，參加免費禮盒抽獎</button>
       <p class="form-msg" id="formMsg" role="status" aria-live="polite">正在連線登記系統…</p>
       <p class="privacy">聯絡資料只有舊巷尋跡團隊看得到，只用來通知開賣與抽獎結果。</p>
@@ -771,8 +772,9 @@ html.view-join #join, html.view-join #roster{animation:pageIn .45s cubic-bezier(
 <canvas class="burst" id="burst" aria-hidden="true"></canvas>
 
 <script>
-/* 把 IG 連結填在這裡；留空時按鈕會顯示「IG 即將開放」 */
-const LINKS = { instagram: "" };
+/* 把 IG 連結填在這裡；留空時按鈕會顯示「IG 即將開放」
+   sheet：Google Apps Script 網頁應用程式網址，登記會寫進「舊巷尋跡｜搶先登記名單」試算表 */
+const LINKS = { instagram: "", sheet: "https://script.google.com/macros/s/AKfycbzWbUs2ak-8bH_zpyrISrtkqbH0ZvxfaqfKL7xj4qgsg5O_BArySNb7HDg5R4KHTKD_fA/exec" };
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const SHOPS = [
@@ -1058,6 +1060,7 @@ const quiz = (() => {
   }
   ['name','contact'].forEach(n => form.elements[n].addEventListener('input', () => fieldErr(n, '')));
   function blocked(){
+    if(LINKS.sheet) return;
     ready = false; submit.disabled = true;
     say('這個頁面目前無法收你的登記。請追蹤我們的 IG，或私訊團隊報名。');
   }
@@ -1093,7 +1096,19 @@ const quiz = (() => {
     if(!data.quizType){ delete data.quizType; }
     submit.disabled = true; say('送出中…');
     try{
-      await db.doc('signups/' + uid).set({ ...data, updatedAt: new Date().toISOString() });
+      let sent = false;
+      if(LINKS.sheet){
+        try{
+          await fetch(LINKS.sheet, { method:'POST', mode:'no-cors', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body: JSON.stringify({ ...data, website: form.elements.website.value }) });
+          sent = true;
+        }catch(netErr){ if(!(db && uid)) throw netErr; }
+      }
+      if(db && uid){
+        try{ await db.doc('signups/' + uid).set({ ...data, updatedAt: new Date().toISOString() }); sent = true; }
+        catch(dbErr){ if(!sent) throw dbErr; }
+      }
+      if(!sent) throw new Error('no_target');
+      try{ localStorage.setItem('oldlane-signed', '1'); }catch(_){}
       say('登記完成！開賣和抽獎結果會透過你留的聯絡方式通知你。', 'ok');
       submit.textContent = '更新我的登記';
       burst(submit);
@@ -1104,6 +1119,10 @@ const quiz = (() => {
     }finally{ if(ready) submit.disabled = false; }
   });
 
+  if(LINKS.sheet){
+    ready = true; submit.disabled = false; say('');
+    try{ if(localStorage.getItem('oldlane-signed')){ submit.textContent = '再送一次登記'; say('你已經登記過了，如果資料有變可以再送一次。'); } }catch(_){}
+  }
   (async () => {
     const api = window.claude;
     if(!api || !api.use){ blocked(); return; }
